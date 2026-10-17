@@ -90,18 +90,20 @@ Cập nhật lần cuối: 2026-10-17 (phiên 2)
 - [ ] CHỜ chủ máy xác nhận bối cảnh: dùng TT200 hay TT133? Đã có phần mềm HĐĐT riêng chưa?
       Kê khai bằng HTKK/eTax hay in từ Tony?
 
-### Giai đoạn 3 — Điều tra chuyên sâu phần TỐI ƯU (LÀM SAU giai đoạn 2 — chủ máy yêu cầu)
+### Giai đoạn 3 — Điều tra chuyên sâu phần TỐI ƯU (✅ Phân tích tĩnh XONG — xem DIEU_TRA_TOI_UU.md)
 > Chủ máy: index thì OK, nhưng thay đổi KẾT CẤU SOURCE của phần mềm TIỀN BẠC thì KHÔNG được làm hời hợt.
-- [ ] Soi từng procedure bị viết lại (mục 9). Với MỖI proc: khẳng định logic mới == logic cũ về KẾT QUẢ SỐ,
-      chỉ khác tốc độ. Chú ý bẫy:
-      - `SUM(IIF(SIDE=0,...))` gộp có bỏ sót dòng SIDE khác 0/1 không? (bản gốc lọc SIDE=0 / SIDE=1 riêng)
-      - `IF NOT EXISTS(...DOCUMENTS...) THEN EXIT/trả 0` — có đúng mọi nhánh biên (kỳ rỗng, ngày đầu kỳ) không?
-      - `PLAN (B INDEX ...)` ép cứng — nếu index đổi tên/mất thì proc GÃY. Cân nhắc bỏ ép, để optimizer tự chọn.
-      - Đổi `DOUBLE -> NUMERIC(18,4)`: kiểm tra làm tròn/chênh lệch tiền trên dữ liệu thật.
-      - `CMD_GET_PERIOD_FROM_DATE` -> `PERIODS BETWEEN`: có xử lý ngày không thuộc kỳ nào / trùng 2 kỳ không?
-- [ ] KIỂM THỬ ĐỐI CHIẾU: chạy cùng bộ tham số (company, kỳ, ngày) trên bản GỐC và bản TỐI ƯU,
-      so từng dòng Bảng cân đối + các sổ liên quan. CHỈ chấp nhận khi số liệu TRÙNG KHỚP 100%.
+- [x] Soi 6/6 procedure viết lại, đối chiếu từng dòng + xác minh quan hệ khóa (DOCUMENTS->ENTRIES->
+      CREDIT_DEBIT đơn trị; PERIOD id toàn cục; PERIODS không chồng kỳ). Trả lời hết các bẫy đã nêu:
+      - SUM(IIF(SIDE=0/1)): đúng, mỗi dòng 1 SIDE nên không sót/không trùng.
+      - Chốt sớm NOT EXISTS DOCUMENTS: tương đương tập rỗng->0 của bản gốc.
+      - CMD_GET_PERIOD_FROM_DATE -> PERIODS BETWEEN: truy vấn GIỐNG HỆT; phần dư (IS_BEGINNING) không dùng.
+      - Bỏ COMPANY khỏi WHERE BALANCES: an toàn vì PERIOD id toàn cục.
+      - => 6/6 TƯƠNG ĐƯƠNG VỀ SỐ LIỆU (phân tích tĩnh).
+- [ ] CÒN LẠI (chủ máy yêu cầu, sẽ làm khi có môi trường test): KIỂM THỬ ĐỐI CHIẾU SỐ THỰC —
+      chạy cùng tham số trên bản GỐC vs TỐI ƯU, so từng dòng, PASS khi trùng 100%.
 - [ ] Đo thời gian trước/sau, ghi lại.
+- 3 RỦI RO VẬN HÀNH cần xử lý trong script (xem DIEU_TRA_TOI_UU.md): (1) PLAN ép cứng index ->
+      tạo index trước; (2) DOUBLE->NUMERIC(18,4) soi làm tròn ngoại tệ; (3) 1 index DOCUMENTS trùng.
 
 ### Giai đoạn 4 — Script update tái lập (CHỈ sau khi Giai đoạn 3 PASS)
 - [ ] Viết `update_optimize.sql` gói: CREATE INDEX + ALTER PROCEDURE + CREATE TABLE X_BANG_CAN_DOI (+ cache nếu có).
@@ -196,3 +198,8 @@ sang `... = ACCOUNTS.COMPANY` / `... = ATOMS.COMPANY` (join theo cột thay vì 
   Phát hiện chính: (1) HĐĐT phải làm bằng công cụ ngoài, không nhét vào Tony được;
   (2) thuế 8% KHÔNG cần sửa DB vì VAT_PERCENT là trường số tự do; (3) tờ khai thuế nên dùng HTKK/eTax;
   (4) TT200/TT133 còn hiệu lực, BCTC còn dùng. CHỜ chủ máy xác nhận bối cảnh để chốt việc cần làm trong Tony.
+
+- 2026-10-17 (phiên 5): GĐ3 - điều tra chuyên sâu 6 procedure tối ưu. Tạo DIEU_TRA_TOI_UU.md.
+  Phương pháp: trích body 2 commit, đối chiếu từng dòng, xác minh quan hệ khóa từ schema.
+  Kết luận phân tích tĩnh: 6/6 proc TƯƠNG ĐƯƠNG số liệu (không cộng trùng/sai kỳ nhờ khóa đơn trị +
+  PERIOD toàn cục). Ghi 3 rủi ro vận hành cho script update. CÒN: kiểm thử số thực khi có môi trường test.
