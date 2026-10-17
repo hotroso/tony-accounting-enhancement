@@ -1,0 +1,17 @@
+# Firebird database files (binary, large) — KHÔNG commit dữ liệu
+*.fdb
+*.gdb
+*.tdb
+*.TDB
+*.fbk
+*.gbk
+*.bak
+
+# Backup copies
+backup/
+*.copy
+
+# Logs / temp
+*.log
+*.tmp
+~*
