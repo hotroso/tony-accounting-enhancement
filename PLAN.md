@@ -77,9 +77,18 @@ Cập nhật lần cuối: 2026-10-17 (phiên 2)
 4. **Đổi domain -> kiểu gốc**: DM_ID->BIGINT, DM_DATE->DATE, DM_DOUBLE->DECIMAL/NUMERIC(18,4).
    <- Lưu ý: NUMERIC(18,4) làm tròn KHÁC DOUBLE -> phải soi kỹ chênh lệch số dư.
 
-### Giai đoạn 2 — Cập nhật thông tư/nghị định (LÀM TRƯỚC, theo yêu cầu chủ máy)
-- [ ] Lập danh mục văn bản 2017→nay (TT133/2016, TT200/2014 sửa đổi, Nghị định 123/2020 + TT78/2021 hóa đơn điện tử, mẫu BCTC...).
-- [ ] Đối chiếu khả năng: sửa qua SP / sửa report .repx / phải làm ngoài (HTKK) / không làm được.
+### Giai đoạn 2 — Cập nhật thông tư/nghị định (✅ Rà soát XONG — xem CAP_NHAT_PHAP_LY.md)
+- [x] Lập danh mục văn bản 2018→2026 + đối chiếu khả năng xử lý. Kết quả:
+  - Phần mềm hỗ trợ CẢ TT200 (DN200) và TT133 (DNN133). Cập nhật cuối: TA_2018_05_15.uql (05/2018).
+  - **Hóa đơn điện tử** (NĐ123/2020, TT78/2021, NĐ70/2025, TT32/2025): ❌ Tony KHÔNG làm được ->
+    dùng phần mềm HĐĐT riêng; Tony chỉ còn vai trò sổ sách.
+  - **GTGT 8%** (NĐ174/2025 đến hết 2026): ✅ ĐÃ KIỂM TRA DB -> VAT_PERCENT là trường số tự do
+    (DM_DOUBLE, không CHECK, không bảng danh mục) -> gõ 8 là xong, KHÔNG cần sửa gì.
+  - **Mẫu tờ khai GTGT** (TT80/2021): ⚠️ mẫu trong Tony cũ (dừng ở TT26/2015) -> kê khai thẳng HTKK/eTax.
+  - **Chế độ kế toán TT200/TT133**: vẫn hiện hành -> BCTC còn dùng được, rà report .repx nếu cần.
+- [ ] (TÙY chủ máy) Rà report BCTC .repx nếu phát hiện chỉ tiêu lệch mẫu hiện hành.
+- [ ] CHỜ chủ máy xác nhận bối cảnh: dùng TT200 hay TT133? Đã có phần mềm HĐĐT riêng chưa?
+      Kê khai bằng HTKK/eTax hay in từ Tony?
 
 ### Giai đoạn 3 — Điều tra chuyên sâu phần TỐI ƯU (LÀM SAU giai đoạn 2 — chủ máy yêu cầu)
 > Chủ máy: index thì OK, nhưng thay đổi KẾT CẤU SOURCE của phần mềm TIỀN BẠC thì KHÔNG được làm hời hợt.
@@ -182,3 +191,8 @@ Kiểu thay đổi chung ở các proc trên:
 Đổi điều kiện JOIN từ `ATOMS.COMPANY = :P_COMPANY` / `ATOM_STRINGS.COMPANY = :P_COMPANY`
 sang `... = ACCOUNTS.COMPANY` / `... = ATOMS.COMPANY` (join theo cột thay vì hằng tham số).
 -> Thường vô hại/đúng hơn, nhưng vẫn ghi nhận để kiểm khi đối chiếu.
+
+- 2026-10-17 (phiên 4): GĐ2 - rà soát pháp lý 2018->2026. Tạo CAP_NHAT_PHAP_LY.md.
+  Phát hiện chính: (1) HĐĐT phải làm bằng công cụ ngoài, không nhét vào Tony được;
+  (2) thuế 8% KHÔNG cần sửa DB vì VAT_PERCENT là trường số tự do; (3) tờ khai thuế nên dùng HTKK/eTax;
+  (4) TT200/TT133 còn hiệu lực, BCTC còn dùng. CHỜ chủ máy xác nhận bối cảnh để chốt việc cần làm trong Tony.
