@@ -2,7 +2,7 @@
 
 > File này là bộ nhớ dài hạn của dự án. Mỗi lần quay lại, ĐỌC FILE NÀY TRƯỚC để không quên nhiệm vụ và bối cảnh.
 
-Cập nhật lần cuối: 2026-10-17
+Cập nhật lần cuối: 2026-10-17 (phiên 2)
 
 ---
 
@@ -46,10 +46,25 @@ Cập nhật lần cuối: 2026-10-17
 - [ ] Phần mềm phải TẮT khi thao tác DB (Firebird embedded khóa file độc quyền).
 - [ ] Backup file DB (copy) + backup logic (gbak) trước khi sửa bất cứ gì.
 
-### Giai đoạn 1 — Trích xuất cấu trúc (ĐANG LÀM)
-- [ ] git init tại D:\001.Sac\firebird
-- [ ] Trích toàn bộ metadata (DDL): tables, domains, procedures (logic thật), triggers, indexes, views, generators, constraints -> file .sql
-- [ ] git commit lưu cấu trúc
+### Giai đoạn 1 — Trích xuất cấu trúc (✅ XONG — bản ĐÃ TỐI ƯU)
+- [x] git init tại D:\001.Sac\firebird
+- [x] Trích toàn bộ metadata (DDL) từ `DULIEU_PMTONY.TDB` (bản đã tối ưu) -> `schema_full.sql` (3.3 MB, 89.154 dòng).
+      Nội dung đã xác minh ĐẦY ĐỦ LOGIC THẬT: 1043 procedure (phần CREATE là stub rỗng theo cơ chế isql,
+      logic thật nằm ở 1043 khối ALTER PROCEDURE phía sau — 3625 DECLARE VARIABLE), 147 table, 57 trigger,
+      44 index, 91 domain, 2 generator. Đã đọc tận mắt body của INT_CAL_FINANCIAL_BALANCE.
+- [x] Backup nhị phân chuẩn bằng gbak: `optimized_metadata.fbk` (6.09 MB, metadata-only `-m`).
+      ĐÃ TEST RESTORE thành công -> file hợp lệ, phục hồi 100%. (File .fbk KHÔNG commit git, giữ trên đĩa.)
+- [x] git commit lưu cấu trúc bản đã tối ưu làm MỐC SO SÁNH.
+
+> LƯU Ý cơ chế trích: `isql -extract` / gbak sinh ra procedure 2 lần — CREATE (stub `BEGIN SUSPEND; END`
+> để phá tham chiếu vòng) rồi ALTER (body thật). Khi đọc file phải nhìn phần ALTER mới thấy logic.
+
+### Giai đoạn 1b — Khi nhận lại DATA GỐC (chưa tối ưu) — CHỜ CHỦ MÁY
+- [ ] Chủ máy cung cấp lại file data GỐC (chưa tối ưu).
+- [ ] Trích `schema_full.sql` lần nữa từ bản GỐC bằng ĐÚNG lệnh đã dùng (xem mục 8) để điều kiện so sánh đồng nhất.
+- [ ] `git diff` giữa bản GỐC và bản ĐÃ TỐI ƯU -> xác định CHÍNH XÁC đã đổi gì (index? viết lại procedure?
+      statistics?) khiến Bảng cân đối từ ~30 phút xuống còn vài chục giây.
+- [ ] Ghi lại thay đổi đó thành script tái lập được.
 
 ### Giai đoạn 2 — Chẩn đoán "Bảng cân đối" chậm (chờ data gốc)
 - [ ] Nhận lại data GỐC từ chủ máy.
@@ -74,3 +89,23 @@ Cập nhật lần cuối: 2026-10-17
 
 ## 7. Nhật ký tiến độ
 - 2026-10-17: Khảo sát xong kiến trúc. Xác định logic nằm trong DB (1044 SP). Tìm thấy Firebird 2.5 tools. Lập plan, git init, chuẩn bị trích cấu trúc từ bản data đã tối ưu.
+- 2026-10-17 (phiên 2): Trích xuất XONG bản ĐÃ TỐI ƯU. Xác minh schema_full.sql có đủ logic thật
+  (1043 proc có body ở phần ALTER). Tạo + test-restore backup gbak `optimized_metadata.fbk` -> hợp lệ.
+  Cập nhật .gitignore (bỏ qua file tạm `_*` và thư mục session). Commit mốc "đã tối ưu".
+  Phát hiện: Firebird server (fbserver.exe) đang chạy dạng Windows Service -> trích metadata qua
+  `localhost:` ổn, nhưng nếu cần thao tác mức file (copy/gbak offline) thì phải dừng service trước.
+  ĐANG CHỜ: data GỐC chưa tối ưu từ chủ máy để đối chiếu diff.
+
+## 8. Lệnh trích xuất CHUẨN (dùng LẠI y hệt cho bản gốc để diff đồng nhất)
+
+Trích DDL đầy đủ (chạy khi app Tony đã tắt):
+```
+"C:\Program Files\Firebird\Firebird_2_5\bin\isql.exe" -user SYSDBA -password masterkey ^
+  -extract "localhost:D:\001.Sac\<FILE_DATA>" -output "D:\001.Sac\firebird\schema_full.sql"
+```
+Backup metadata nhị phân (test restore để chắc hợp lệ):
+```
+"C:\Program Files\Firebird\Firebird_2_5\bin\gbak.exe" -b -m -user SYSDBA -password masterkey ^
+  "localhost:D:\001.Sac\<FILE_DATA>" "D:\001.Sac\firebird\<ten>.fbk"
+```
+> Đăng nhập Firebird: SYSDBA / masterkey (mặc định).
