@@ -59,26 +59,46 @@ Cập nhật lần cuối: 2026-10-17 (phiên 2)
 > LƯU Ý cơ chế trích: `isql -extract` / gbak sinh ra procedure 2 lần — CREATE (stub `BEGIN SUSPEND; END`
 > để phá tham chiếu vòng) rồi ALTER (body thật). Khi đọc file phải nhìn phần ALTER mới thấy logic.
 
-### Giai đoạn 1b — Khi nhận lại DATA GỐC (chưa tối ưu) — CHỜ CHỦ MÁY
-- [ ] Chủ máy cung cấp lại file data GỐC (chưa tối ưu).
-- [ ] Trích `schema_full.sql` lần nữa từ bản GỐC bằng ĐÚNG lệnh đã dùng (xem mục 8) để điều kiện so sánh đồng nhất.
-- [ ] `git diff` giữa bản GỐC và bản ĐÃ TỐI ƯU -> xác định CHÍNH XÁC đã đổi gì (index? viết lại procedure?
-      statistics?) khiến Bảng cân đối từ ~30 phút xuống còn vài chục giây.
-- [ ] Ghi lại thay đổi đó thành script tái lập được.
+### Giai đoạn 1b — Đối chiếu GỐC vs TỐI ƯU (✅ XONG)
+- [x] Nhận lại data GỐC (từ backup DULIEU_PMTONY_20230618_190000.rar). Trích `schema_original.sql`.
+- [x] Sắp lại lịch sử git ĐÚNG CHIỀU THỜI GIAN để diff đọc tự nhiên (gốc -> tối ưu):
+      - `12ec8af` = schema bản GỐC chưa tối ưu (baseline)
+      - `8cae432` = schema bản ĐÃ TỐI ƯU
+      - Xem bất cứ lúc nào: `git diff 12ec8af 8cae432 -- schema_full.sql`
+- [x] Phân tích XONG. Kết quả: xem mục 9.
 
-### Giai đoạn 2 — Chẩn đoán "Bảng cân đối" chậm (chờ data gốc)
-- [ ] Nhận lại data GỐC từ chủ máy.
-- [ ] Trích logic thật của các RPT_BANG_CAN_DOI_* và INT_CAL_FINANCIAL_BALANCE.
-- [ ] Chạy PLAN / phân tích: thiếu index? cursor lồng? quét toàn bảng? thống kê lỗi thời?
-- [ ] BÁO CÁO nguyên nhân + phương án cho chủ máy, xin duyệt TRƯỚC khi sửa.
+### KẾT LUẬN diff (tóm tắt — chi tiết ở mục 9)
+Để Bảng cân đối từ ~30 phút -> vài chục giây, bản tối ưu đã làm 4 nhóm việc:
+1. **+13 INDEX** trên CREDIT_DEBIT, BALANCES, DOCUMENTS, PERIODS, ATOMS  <- ĐÒN QUYẾT ĐỊNH, an toàn.
+2. **Viết lại ~6 procedure** tính phát sinh/số dư (INT_PS_1_TK*, INT_SD_1_TK*): bỏ EXISTS lồng,
+   gộp quét SIDE 0/1 bằng SUM(IIF()), thêm chốt EXIT sớm, ép PLAN INDEX, thay CMD_GET_PERIOD_FROM_DATE
+   bằng truy vấn PERIODS trực tiếp.  <- ĐỤNG LOGIC TIỀN, PHẢI KIỂM THỬ ĐỐI CHIẾU.
+3. **+ bảng cache `X_BANG_CAN_DOI`** (có CREATED_AT + index) — nghi dùng cache kết quả.
+4. **Đổi domain -> kiểu gốc**: DM_ID->BIGINT, DM_DATE->DATE, DM_DOUBLE->DECIMAL/NUMERIC(18,4).
+   <- Lưu ý: NUMERIC(18,4) làm tròn KHÁC DOUBLE -> phải soi kỹ chênh lệch số dư.
 
-### Giai đoạn 3 — Tối ưu
-- [ ] Áp index / viết lại procedure / cập nhật statistics, sau khi backup.
-- [ ] Đo lại thời gian chạy, so sánh trước/sau.
-
-### Giai đoạn 4 — Cập nhật thông tư/nghị định
+### Giai đoạn 2 — Cập nhật thông tư/nghị định (LÀM TRƯỚC, theo yêu cầu chủ máy)
 - [ ] Lập danh mục văn bản 2017→nay (TT133/2016, TT200/2014 sửa đổi, Nghị định 123/2020 + TT78/2021 hóa đơn điện tử, mẫu BCTC...).
 - [ ] Đối chiếu khả năng: sửa qua SP / sửa report .repx / phải làm ngoài (HTKK) / không làm được.
+
+### Giai đoạn 3 — Điều tra chuyên sâu phần TỐI ƯU (LÀM SAU giai đoạn 2 — chủ máy yêu cầu)
+> Chủ máy: index thì OK, nhưng thay đổi KẾT CẤU SOURCE của phần mềm TIỀN BẠC thì KHÔNG được làm hời hợt.
+- [ ] Soi từng procedure bị viết lại (mục 9). Với MỖI proc: khẳng định logic mới == logic cũ về KẾT QUẢ SỐ,
+      chỉ khác tốc độ. Chú ý bẫy:
+      - `SUM(IIF(SIDE=0,...))` gộp có bỏ sót dòng SIDE khác 0/1 không? (bản gốc lọc SIDE=0 / SIDE=1 riêng)
+      - `IF NOT EXISTS(...DOCUMENTS...) THEN EXIT/trả 0` — có đúng mọi nhánh biên (kỳ rỗng, ngày đầu kỳ) không?
+      - `PLAN (B INDEX ...)` ép cứng — nếu index đổi tên/mất thì proc GÃY. Cân nhắc bỏ ép, để optimizer tự chọn.
+      - Đổi `DOUBLE -> NUMERIC(18,4)`: kiểm tra làm tròn/chênh lệch tiền trên dữ liệu thật.
+      - `CMD_GET_PERIOD_FROM_DATE` -> `PERIODS BETWEEN`: có xử lý ngày không thuộc kỳ nào / trùng 2 kỳ không?
+- [ ] KIỂM THỬ ĐỐI CHIẾU: chạy cùng bộ tham số (company, kỳ, ngày) trên bản GỐC và bản TỐI ƯU,
+      so từng dòng Bảng cân đối + các sổ liên quan. CHỈ chấp nhận khi số liệu TRÙNG KHỚP 100%.
+- [ ] Đo thời gian trước/sau, ghi lại.
+
+### Giai đoạn 4 — Script update tái lập (CHỈ sau khi Giai đoạn 3 PASS)
+- [ ] Viết `update_optimize.sql` gói: CREATE INDEX + ALTER PROCEDURE + CREATE TABLE X_BANG_CAN_DOI (+ cache nếu có).
+      Có phần kiểm tra tồn tại (tránh lỗi nếu chạy lại), có thứ tự đúng, có backup nhắc nhở ở đầu file.
+- [ ] Viết kèm `rollback_optimize.sql` để gỡ nếu cần.
+- [ ] Test áp script trên 1 bản copy data trước khi dùng thật.
 
 ## 6. Nguyên tắc an toàn
 - LUÔN backup trước khi can thiệp DB.
@@ -95,6 +115,10 @@ Cập nhật lần cuối: 2026-10-17 (phiên 2)
   Phát hiện: Firebird server (fbserver.exe) đang chạy dạng Windows Service -> trích metadata qua
   `localhost:` ổn, nhưng nếu cần thao tác mức file (copy/gbak offline) thì phải dừng service trước.
   ĐANG CHỜ: data GỐC chưa tối ưu từ chủ máy để đối chiếu diff.
+- 2026-10-17 (phiên 3): Nhận data GỐC, trích schema, sắp lịch sử git đúng chiều (12ec8af gốc -> 8cae432 tối ưu).
+  Phân tích XONG diff: 13 index + 6 proc viết lại + bảng cache X_BANG_CAN_DOI + đổi domain. Chi tiết mục 9.
+  CHỐT với chủ máy: làm Cập nhật thông tư/nghị định (GĐ2) TRƯỚC; rồi điều tra chuyên sâu phần tối ưu (GĐ3)
+  như chuyên gia vì đụng logic tiền bạc; cuối cùng mới xuất script update (GĐ4) sau khi kiểm thử PASS.
 
 ## 8. Lệnh trích xuất CHUẨN (dùng LẠI y hệt cho bản gốc để diff đồng nhất)
 
@@ -109,3 +133,52 @@ Backup metadata nhị phân (test restore để chắc hợp lệ):
   "localhost:D:\001.Sac\<FILE_DATA>" "D:\001.Sac\firebird\<ten>.fbk"
 ```
 > Đăng nhập Firebird: SYSDBA / masterkey (mặc định).
+
+## 9. Chi tiết phân tích diff GỐC → TỐI ƯU (12ec8af → 8cae432)
+
+> Lệnh xem lại: `git diff 12ec8af 8cae432 -- schema_full.sql`
+
+### 9.1. INDEX được thêm (13) — tác động lớn nhất, an toàn
+```
+ATOMS_CODE_IDX                ON ATOMS (CODE)
+IDX_BAL_COMPANY_PERIOD        ON BALANCES (COMPANY, PERIOD)
+IDX_BAL_PERIOD_ACC            ON BALANCES (PERIOD, ACCOUNT)
+IDX_BAL_PERIOD_ACC_OBJ0       ON BALANCES (PERIOD, ACCOUNT, OBJECT0)
+IDX_CD_COMPANY_ACC_OBJ0       ON CREDIT_DEBIT (COMPANY, ACCOUNT, OBJECT0)
+IDX_CD_COMPANY_ACC_SIDE       ON CREDIT_DEBIT (COMPANY, ACCOUNT, SIDE)
+IDX_CD_ENTRY_ACC_OBJ0         ON CREDIT_DEBIT (ENTRY, ACCOUNT, OBJECT0)
+IDX_CD_ENTRY_ACC_SIDE         ON CREDIT_DEBIT (ENTRY, ACCOUNT, SIDE)
+DOCUMENTS_COMPANY_IDX         ON DOCUMENTS (COMPANY, INPUT_DATE)
+IDX_DOC_COMPANY_DATE          ON DOCUMENTS (COMPANY, INPUT_DATE)   -- trùng chức năng DOCUMENTS_COMPANY_IDX, xem lại
+IDX_DOC_COMPANY_PERIOD        ON DOCUMENTS (COMPANY, PERIOD)
+IDX_PERIODS_COMPANY_DATES     ON PERIODS (COMPANY, BEGINNING_DATE, ENDING_DATE)
+X_BANG_CAN_DOI_CREATED_AT_IDX ON X_BANG_CAN_DOI (CREATED_AT)
+```
+> LƯU Ý: `DOCUMENTS_COMPANY_IDX` và `IDX_DOC_COMPANY_DATE` cùng (COMPANY, INPUT_DATE) -> 1 cái thừa, xem lại ở GĐ3.
+
+### 9.2. Bảng mới `X_BANG_CAN_DOI` (nghi dùng cache kết quả Bảng cân đối)
+Cột: UUID(PK), CAP, VIRTUAL_ID, PARENT_ID, ID, CODE, NAME, IS_ACCOUNT, IS_GOODS_ACCOUNT,
+BEGINNING_AMOUNT/DEBIT/CREDIT, RISING_DEBIT_AMOUNT/DEBIT/CREDIT_AMOUNT/CREDIT,
+ENDING_AMOUNT/DEBIT/CREDIT, CREATED_AT. -> Cần tìm proc nào GHI/ĐỌC bảng này để hiểu cơ chế cache.
+
+### 9.3. Procedure bị VIẾT LẠI (đụng logic tiền — kiểm thử kỹ ở GĐ3)
+- `INT_PS_1_TK`           — phát sinh Nợ/Có 1 tài khoản trong kỳ.
+- `INT_PS_1_TK_1_DT0_DT1` — phát sinh theo đối tượng 1 (chi tiết).
+- `INT_PS_1_TK_DT0`       — phát sinh theo đối tượng 0.
+- `INT_SD_1_TK_DN`        — số dư 1 tài khoản đầu ngày.
+- `INT_SD_1_TK_DT0_DN`    — số dư theo đối tượng 0 đầu ngày.
+- `INT_SD_1_TK_1_DT0_DT1_DN` — số dư theo đối tượng 1 đầu ngày.
+
+Kiểu thay đổi chung ở các proc trên:
+- EXISTS lồng nhau (subquery tương quan)  ->  JOIN phẳng: lọc DOCUMENTS theo ngày trước (derived table) rồi JOIN CREDIT_DEBIT.
+- 2 lần quét riêng SIDE=0 và SIDE=1  ->  1 lần quét, dùng SUM(IIF(SIDE=0,...)) / SUM(IIF(SIDE=1,...)).
+- Thêm chốt sớm: IF NOT EXISTS(DOCUMENTS trong khoảng ngày) THEN EXIT (hoặc trả 0 rồi SUSPEND).
+- Ép optimizer: thêm `PLAN (B INDEX (IDX_BAL_PERIOD_ACC[_OBJ0]))`.
+- Thay gọi `CMD_GET_PERIOD_FROM_DATE(...)` bằng SELECT trực tiếp trên PERIODS ... BETWEEN BEGINNING_DATE AND ENDING_DATE.
+- Đổi tham số/biến: DM_ID->BIGINT, DM_DATE->DATE, DM_DOUBLE->DECIMAL(18,4) hoặc NUMERIC(18,4).
+  (Một số biến trung gian giữ DOUBLE PRECISION -> cần rà nhất quán kiểu để không lệch làm tròn.)
+
+### 9.4. Một procedure khác (ngoài nhóm tốc độ — sửa đúng đắn join)
+Đổi điều kiện JOIN từ `ATOMS.COMPANY = :P_COMPANY` / `ATOM_STRINGS.COMPANY = :P_COMPANY`
+sang `... = ACCOUNTS.COMPANY` / `... = ATOMS.COMPANY` (join theo cột thay vì hằng tham số).
+-> Thường vô hại/đúng hơn, nhưng vẫn ghi nhận để kiểm khi đối chiếu.
